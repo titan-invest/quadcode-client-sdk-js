@@ -1,4 +1,7 @@
-import WebSocket from "isomorphic-ws"
+import WebSocket from "isomorphic-ws";
+
+const CONNECTION_STATES = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'];
+const formatRequest = (req: Request<any>): string => JSON.stringify({ message: req.messageName(), body: req.messageBody() }, null, '\t');
 
 /**
  * This is the entry point of this SDK for your application. Use it to implement the business logic of your application.
@@ -3576,6 +3579,9 @@ export class BlitzOptions {
         this.updateActives(activesMsg)
     }
 
+    private static globalId = 0;
+    private currentId = BlitzOptions.globalId++;
+
     /**
      * Requests information about blitz options actives, runs timer for periodical actives list update, puts the information to instance of class BlitzOptions and returns it.
      * @param wsApiClient - Instance of WebSocket API client.
@@ -3585,9 +3591,15 @@ export class BlitzOptions {
 
         const blitzOptions = new BlitzOptions(initializationData.blitzActives, wsApiClient)
 
+        console.log(`[ClientSdkJS] Created blitz options instance BO#${blitzOptions.currentId}`);
+
         blitzOptions.intervalId = setInterval(async () => {
-            const response = await wsApiClient.doRequest<InitializationDataV3>(new CallBinaryOptionsGetInitializationDataV3())
-            blitzOptions.updateActives(response.blitzActives)
+            try {
+                const response = await wsApiClient.doRequest<InitializationDataV3>(new CallBinaryOptionsGetInitializationDataV3())
+                blitzOptions.updateActives(response.blitzActives)
+            } catch (e) {
+                console.log(`[ClientSdkJS] Blitz options BO#${blitzOptions.currentId} update actives error:`, e)
+            }
         }, 600000)
 
         return blitzOptions
@@ -6887,10 +6899,15 @@ class WsApiClient {
         this.onCurrentTimeChangedObserver.notify(time)
     }
 
+    private static globalId = 0;
+    private currentId = WsApiClient.globalId++;
+
     async connect(): Promise<void> {
         if (this.connection !== undefined || this.disconnecting) {
             return
         }
+
+        console.log(`[ClientSdkJS] Connecting WS#${this.currentId}`);
 
         return new Promise((resolve, reject) => {
             try {
@@ -7036,6 +7053,8 @@ class WsApiClient {
 
     private forceCloseConnection() {
         if (this.connection) {
+            console.log(`[ClientSdkJS] Force close connection on WS#${this.currentId}`);
+
             try {
                 if (!this.isBrowser) {
                     (this.connection as any).terminate();
@@ -7085,7 +7104,10 @@ class WsApiClient {
         const requestId = (++this.lastRequestId).toString()
 
         if (!this.connection || this.connection.readyState !== WebSocket.OPEN) {
-            return Promise.reject(new Error('WebSocket connection is not open'));
+            const connectionState = this.connection ? CONNECTION_STATES[this.connection.readyState] : 'undefined';
+            const requestMessage = formatRequest(request);
+            const errorMessage = `Trying to send request when WebSocket connection is not open. Connection state is ${connectionState}, request is ${requestMessage}\n`;
+            return Promise.reject(new Error(errorMessage));
         }
 
         this.connection!.send(JSON.stringify({
@@ -7101,12 +7123,15 @@ class WsApiClient {
 
     private rejectAllPendingRequests(reason: Error) {
         for (const [, meta] of this.pendingRequests) {
+            console.log(`[ClientSdkJS] Rejecting pending request ${formatRequest(meta.request)} on WS#${this.currentId}`);
             meta.reject(reason);
         }
         this.pendingRequests.clear();
     }
 
     resubscribeAll(): Promise<Result[]> {
+        console.log(`[ClientSdkJS] Resubscribing all on WS#${this.currentId}`);
+
         return new Promise((resolve, reject) => {
             const promises: Promise<Result>[] = [];
             if (this.subscriptions.size > 0) {
