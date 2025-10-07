@@ -3,6 +3,29 @@ import WebSocket from "isomorphic-ws";
 const CONNECTION_STATES = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'];
 const formatRequest = (req: Request<any>): string => JSON.stringify({ message: req.messageName(), body: req.messageBody() }, null, '\t');
 
+const asyncLock = async <T>(
+    lock: Record<string, any>,
+    lockName: string,
+    fn: () => Promise<T>,
+): Promise<T> => {
+    if (lockName in lock) {
+        return lock[lockName] as Promise<T>;
+    }
+    
+    const promise = fn();
+    lock[lockName] = promise;
+
+    let result: T;
+    try {
+        result = await promise;
+        delete lock[lockName];
+        return result;
+    } catch (e) {
+        delete lock[lockName];
+        throw e;
+    }
+};
+
 /**
  * This is the entry point of this SDK for your application. Use it to implement the business logic of your application.
  */
@@ -230,7 +253,7 @@ export class ClientSdk {
      */
     public async balances(): Promise<Balances> {
         if (!this.balancesFacade) {
-            this.balancesFacade = await Balances.create(this.wsApiClient)
+            this.balancesFacade = await asyncLock(this, 'balancesLock', () => Balances.create(this.wsApiClient))
         }
         return this.balancesFacade
     }
@@ -240,9 +263,11 @@ export class ClientSdk {
      */
     public async positions(): Promise<Positions> {
         if (!this.positionsFacade) {
-            const actives = await this.actives()
-            const state = await this.wsConnectionState()
-            this.positionsFacade = await Positions.create(this.wsApiClient, this.userProfile.userId, actives, state)
+            this.positionsFacade = await asyncLock(this, 'positionsLock', async () => {
+                const actives = await this.actives()
+                const state = await this.wsConnectionState()
+                return Positions.create(this.wsApiClient, this.userProfile.userId, actives, state)
+            })
         }
         return this.positionsFacade
     }
@@ -252,8 +277,10 @@ export class ClientSdk {
      */
     public async actives(): Promise<Actives> {
         if (!this.activesFacade) {
-            const translations = await this.translations()
-            this.activesFacade = new Actives(this.wsApiClient, this.staticHost, translations)
+            this.activesFacade = await asyncLock(this, 'activesLock', async () => {
+                const translations = await this.translations()
+                return new Actives(this.wsApiClient, this.staticHost, translations)
+            })
         }
         return this.activesFacade
     }
@@ -280,11 +307,13 @@ export class ClientSdk {
      */
     public async blitzOptions(): Promise<BlitzOptions> {
         if (!this.blitzOptionsFacade) {
-            if (!await this.blitzOptionsIsAvailable()) {
-                throw new Error('Blitz options are not available')
-            }
+            this.blitzOptionsFacade = await asyncLock(this, 'blitzOptionsLock', async () => {
+                if (!await this.blitzOptionsIsAvailable()) {
+                    throw new Error('Blitz options are not available')
+                }
 
-            this.blitzOptionsFacade = await BlitzOptions.create(this.wsApiClient)
+                return BlitzOptions.create(this.wsApiClient)
+            });
         }
         return this.blitzOptionsFacade
     }
@@ -301,11 +330,13 @@ export class ClientSdk {
      */
     public async turboOptions(): Promise<TurboOptions> {
         if (!this.turboOptionsFacade) {
-            if (!await this.turboOptionsIsAvailable()) {
-                throw new Error('Turbo options are not available')
-            }
+            this.turboOptionsFacade = await asyncLock(this, 'turboOptionsLock', async () => {
+                if (!await this.turboOptionsIsAvailable()) {
+                    throw new Error('Turbo options are not available')
+                }
 
-            this.turboOptionsFacade = await TurboOptions.create(this.wsApiClient)
+                return TurboOptions.create(this.wsApiClient)
+            });
         }
         return this.turboOptionsFacade
     }
@@ -322,11 +353,13 @@ export class ClientSdk {
      */
     public async binaryOptions(): Promise<BinaryOptions> {
         if (!this.binaryOptionsFacade) {
-            if (!await this.binaryOptionsIsAvailable()) {
-                throw new Error('Binary options are not available')
-            }
+            this.binaryOptionsFacade = await asyncLock(this, 'binaryOptionsLock', async () => {
+                if (!await this.binaryOptionsIsAvailable()) {
+                    throw new Error('Binary options are not available')
+                }
 
-            this.binaryOptionsFacade = await BinaryOptions.create(this.wsApiClient)
+                return BinaryOptions.create(this.wsApiClient)
+            });
         }
         return this.binaryOptionsFacade
     }
@@ -343,11 +376,13 @@ export class ClientSdk {
      */
     public async digitalOptions(): Promise<DigitalOptions> {
         if (!this.digitalOptionsFacade) {
-            if (!await this.digitalOptionsIsAvailable()) {
-                throw new Error('Digital options are not available')
-            }
+            this.digitalOptionsFacade = await asyncLock(this, 'digitalOptionsLock', async () => {
+                if (!await this.digitalOptionsIsAvailable()) {
+                    throw new Error('Digital options are not available')
+                }
 
-            this.digitalOptionsFacade = await DigitalOptions.create(this.wsApiClient)
+                return DigitalOptions.create(this.wsApiClient)
+            });
         }
         return this.digitalOptionsFacade
     }
@@ -364,11 +399,13 @@ export class ClientSdk {
      */
     public async marginForex(): Promise<MarginForex> {
         if (!this.marginForexFacade) {
+            this.marginForexFacade = await asyncLock(this, 'marginForexLock', async () => {
             if (!await this.marginForexIsAvailable()) {
                 throw new Error('Margin forex is not available')
             }
 
-            this.marginForexFacade = await MarginForex.create(this.wsApiClient)
+                return MarginForex.create(this.wsApiClient)
+            });
         }
         return this.marginForexFacade
     }
@@ -385,11 +422,13 @@ export class ClientSdk {
      */
     public async marginCfd(): Promise<MarginCfd> {
         if (!this.marginCfdFacade) {
-            if (!await this.marginCfdIsAvailable()) {
-                throw new Error('Margin CFD is not available')
-            }
+            this.marginCfdFacade = await asyncLock(this, 'marginCfdLock', async () => {
+                if (!await this.marginCfdIsAvailable()) {
+                    throw new Error('Margin CFD is not available')
+                }
 
-            this.marginCfdFacade = await MarginCfd.create(this.wsApiClient)
+                return MarginCfd.create(this.wsApiClient)
+            });
         }
         return this.marginCfdFacade
     }
@@ -406,11 +445,13 @@ export class ClientSdk {
      */
     public async marginCrypto(): Promise<MarginCrypto> {
         if (!this.marginCryptoFacade) {
+            this.marginCryptoFacade = await asyncLock(this, 'marginCryptoLock', async () => {   
             if (!await this.marginCryptoIsAvailable()) {
                 throw new Error('Margin crypto is not available')
             }
 
-            this.marginCryptoFacade = await MarginCrypto.create(this.wsApiClient)
+                return MarginCrypto.create(this.wsApiClient)
+            });
         }
         return this.marginCryptoFacade
     }
@@ -444,9 +485,11 @@ export class ClientSdk {
      */
     public async orders(): Promise<Orders> {
         if (!this.ordersFacade) {
-            const balances = await this.balances()
-            const balanceIds = balances.getBalances().map(balance => balance.id)
-            this.ordersFacade = await Orders.create(this.wsApiClient, this.userProfile.userId, balanceIds)
+            this.ordersFacade = await asyncLock(this, 'ordersLock', async () => {
+                const balances = await this.balances()
+                const balanceIds = balances.getBalances().map(balance => balance.id)
+                return Orders.create(this.wsApiClient, this.userProfile.userId, balanceIds)
+            });
         }
         return this.ordersFacade
     }
@@ -508,7 +551,9 @@ export class ClientSdk {
      */
     public async wsConnectionState(): Promise<WsConnectionState> {
         if (this.wsConnectionStateFacade === undefined) {
-            this.wsConnectionStateFacade = await WsConnectionState.create(this.wsApiClient)
+            this.wsConnectionStateFacade = await asyncLock(this, 'wsConnectionStateLock', () => {
+                return WsConnectionState.create(this.wsApiClient)
+            });
         }
         return this.wsConnectionStateFacade
     }
@@ -518,16 +563,20 @@ export class ClientSdk {
      */
     public async translations(): Promise<Translations> {
         if (!this.translationsFacade) {
-            this.translationsFacade = await Translations.create(this.host)
+            this.translationsFacade = await asyncLock(this, 'translationsLock', () => {
+                return Translations.create(this.host)
+            });
         }
         return this.translationsFacade
     }
 
     private async candlesConsistencyManager(): Promise<CandlesConsistencyManager> {
         if (!this.candlesConsistencyManagerFacade) {
-            const candles = await this.candles();
-            const wsConnectionState = await this.wsConnectionState();
-            this.candlesConsistencyManagerFacade = new CandlesConsistencyManager(wsConnectionState, candles);
+            this.candlesConsistencyManagerFacade =  await asyncLock(this, 'candlesConsistencyManagerLock', async () => {
+                const candles = await this.candles();
+                const wsConnectionState = await this.wsConnectionState();
+                return new CandlesConsistencyManager(wsConnectionState, candles);
+            });
         }
 
         return this.candlesConsistencyManagerFacade;
